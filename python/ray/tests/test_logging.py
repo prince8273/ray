@@ -857,6 +857,35 @@ def test_log_monitor(tmp_path, live_dead_pids):
     assert len(list((log_dir / "old").iterdir())) == 2
 
 
+def test_reopen_same_inode_truncate_seeks_beginning(tmp_path):
+    log_file = tmp_path / "worker.log"
+    log_file.write_bytes(b"line1\nline2\n")
+
+    file_info = LogFileInfo(
+        filename=str(log_file),
+        size_when_last_opened=12,
+        file_position=12,
+        file_handle=open(str(log_file), "rb"),
+        is_err_file=False,
+        job_id=None,
+        worker_pid=None,
+    )
+
+    # Simulate the monitor retaining an offset beyond the rewritten file.
+    file_info.file_handle.close()
+    log_file.write_bytes(b"line3\n")
+    file_info.file_handle = open(str(log_file), "rb")
+
+    file_info.reopen_if_necessary()
+
+    assert file_info.file_position == 0
+    content = file_info.file_handle.read()
+    assert b"line3" in content
+    assert file_info.file_handle.tell() == 6
+    file_info.file_handle.close()
+    assert file_info.size_when_last_opened == 6
+
+
 def test_tpu_logs(tmp_path):
     # Create the log directories. tpu_logs would be a symlink to the
     # /tmp/tpu_logs directory created in Node _init_temp.
