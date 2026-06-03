@@ -1270,5 +1270,42 @@ def test_ray_client_uv_hook_skipped_with_user_py_executable():
         assert "working_dir" not in result
 
 
+def test_specific_server_no_preexec_fn_fork_race(shutdown_only):
+    """Regression test for https://github.com/ray-project/ray/issues/63202.
+
+    Repeated ray.init() against a Ray Client cluster should not fail due
+    to gRPC poller state being corrupted at fork time in the proxier.
+    """
+    import subprocess
+    import sys
+
+    # Each iteration is a fresh process to reproduce the cron-style pattern.
+    failures = []
+    for i in range(20):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import ray; "
+                    "ray.init(address='ray://localhost:10001', "
+                    "log_to_driver=False); "
+                    "ray.shutdown()"
+                ),
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            failures.append((i, result.stderr.decode()[:300]))
+
+    assert not failures, (
+        f"{len(failures)}/20 ray.init attempts failed - "
+        f"fork/gRPC race likely still present.\n"
+        + "\n".join(f"  iter {i}: {msg}" for i, msg in failures)
+    )
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-sv", __file__]))
+

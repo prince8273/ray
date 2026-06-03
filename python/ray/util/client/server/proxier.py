@@ -379,6 +379,7 @@ class ProxyManager:
             serialized_runtime_env_context=serialized_runtime_env_context,
             redis_username=self._redis_username,
             redis_password=self._redis_password,
+            skip_preexec_fn=True,
         )
 
         # Wait for the process being run transitions from the shim process

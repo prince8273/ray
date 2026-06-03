@@ -867,6 +867,7 @@ def start_ray_process(
     stdout_file: Optional[IO[AnyStr]] = None,
     stderr_file: Optional[IO[AnyStr]] = None,
     pipe_stdin: bool = False,
+    skip_preexec_fn: bool = False,
 ):
     """Start one of the Ray processes.
 
@@ -898,6 +899,9 @@ def start_ray_process(
             no redirection should happen, then this should be None.
         pipe_stdin: If true, subprocess.PIPE will be passed to the process as
             stdin.
+        skip_preexec_fn: If true, skip the preexec_fn on POSIX. Use this when
+            the caller already holds active gRPC channels, as fork()-with-preexec
+            while gRPC threads are live can corrupt the child's poller state.
 
     Returns:
         Information about the process that was started including a handle to
@@ -1048,7 +1052,11 @@ def start_ray_process(
         stdout=stdout_file,
         stderr=stderr_file,
         stdin=subprocess.PIPE if pipe_stdin else None,
-        preexec_fn=preexec_fn if sys.platform != "win32" else None,
+        preexec_fn=(
+            None
+            if (sys.platform == "win32" or skip_preexec_fn)
+            else preexec_fn
+        ),
         creationflags=CREATE_SUSPENDED if win32_fate_sharing else 0,
     )
 
@@ -2415,6 +2423,7 @@ def start_ray_client_server(
     node_id: Optional[str] = None,
     server_type: str = "proxy",
     serialized_runtime_env_context: Optional[str] = None,
+    skip_preexec_fn: bool = False,
 ):
     """Run the server process of the Ray client.
 
@@ -2434,6 +2443,9 @@ def start_ray_client_server(
         server_type: Whether to start the proxy version of Ray Client.
         serialized_runtime_env_context (str|None): If specified, the serialized
             runtime_env_context to start the client server in.
+        skip_preexec_fn: If true, skip the preexec_fn on POSIX. Should be set
+            to True when launching specific servers from the proxier, which
+            holds live gRPC channels at fork time.
 
     Returns:
         ProcessInfo for the process that was started.
@@ -2480,6 +2492,7 @@ def start_ray_client_server(
         stderr_file=stderr_file,
         fate_share=fate_share,
         env_updates=env_updates,
+        skip_preexec_fn=skip_preexec_fn,
     )
     return process_info
 
