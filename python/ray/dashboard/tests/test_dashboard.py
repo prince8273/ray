@@ -912,7 +912,7 @@ def test_async_loop_forever():
     reason="This test is not supposed to work for minimal installation.",
 )
 @pytest.mark.asyncio
-async def test_dashboard_agent_survives_module_exception(tmp_path, monkeypatch, caplog):
+async def test_dashboard_agent_survives_module_exception(tmp_path, monkeypatch):
     stop_event = asyncio.Event()
     good_module_started = asyncio.Event()
 
@@ -942,7 +942,7 @@ async def test_dashboard_agent_survives_module_exception(tmp_path, monkeypatch, 
     class GoodModule:
         async def run(self, server):
             good_module_started.set()
-            await asyncio.Event().wait()
+            await stop_event.wait()
 
     class BadModule:
         async def run(self, server):
@@ -980,17 +980,25 @@ async def test_dashboard_agent_survives_module_exception(tmp_path, monkeypatch, 
         lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(agent, "_load_modules", lambda: [GoodModule(), BadModule()])
-    caplog.set_level(logging.ERROR, logger="ray.dashboard.agent")
 
-    run_task = asyncio.create_task(agent.run())
-    await asyncio.wait_for(good_module_started.wait(), timeout=5)
-    await asyncio.sleep(0)
-    assert run_task.done() is False
-    assert "simulated module failure" in caplog.text
-
-    stop_event.set()
-    await run_task
-    assert agent.http_server.cleaned_up is True
+    from unittest.mock import patch
+    with patch("ray.dashboard.agent.logger.exception") as mock_logger_exc:
+        run_task = asyncio.create_task(agent.run())
+        try:
+            await asyncio.wait_for(good_module_started.wait(), timeout=5)
+            # Give the event loop time to run BadModule and log the exception
+            for _ in range(10):
+                if mock_logger_exc.called:
+                    break
+                await asyncio.sleep(0.1)
+            
+            assert run_task.done() is False
+            assert mock_logger_exc.called
+            assert "Dashboard module task '%s' exited unexpectedly." in mock_logger_exc.call_args[0]
+        finally:
+            stop_event.set()
+            await run_task
+            assert agent.http_server.cleaned_up is True
 
 
 @pytest.mark.skipif(
